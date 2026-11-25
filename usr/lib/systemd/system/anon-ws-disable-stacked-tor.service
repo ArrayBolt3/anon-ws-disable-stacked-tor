@@ -30,5 +30,25 @@ ExecStartPre=/usr/libexec/anon-ws-disable-stacked-tor/state-files
 User=debian-tor
 ExecStart=/usr/libexec/anon-ws-disable-stacked-tor/socat-unix-sockets
 
+## W^X hardening (anonymous + file-backed). MemoryDenyWriteExecute denies anon
+## W+X / mprotect/shmat gaining PROT_EXEC; SystemCallArchitectures=native closes
+## the secondary-ABI bypass; LockPersonality blocks READ_IMPLIES_EXEC;
+## SystemCallFilter=~memfd_create kills the memfd bypass; NoExecPaths marks the
+## writable dirs non-executable -- including /var/lib/tor, the daemon's own
+## writable state dir. socat-unix-sockets runs as debian-tor, no JIT. NOTE:
+## ExecStartPre (state-files) is a root control process and PermissionsStartOnly=
+## true EXEMPTS it from this sandbox; W^X applies to ExecStart only.
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+SystemCallFilter=~memfd_create
+NoExecPaths=/run /tmp /var/tmp /dev/shm /var/lib/tor
+
+## Defense-in-depth (separate axis from W^X): NoNewPrivileges blocks this
+## unit's processes from gaining privileges (setuid/setgid, file capabilities,
+## AppArmor non-subset Px). ExecStart (socat) and the root ExecStartPre
+## (state-files: cp/chmod/chown) gain no new privilege.
+NoNewPrivileges=yes
+
 [Install]
 WantedBy=multi-user.target

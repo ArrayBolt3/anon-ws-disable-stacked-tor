@@ -32,12 +32,23 @@
 # init #
 ########
 
+## generated_comment / system_run / GATEWAY_IP / GATEWAY_IP6 are assigned via
+## default_if_empty (helper-scripts strings.bsh, sourced below) -- an indirect
+## assignment shellcheck cannot see, so it emits SC2154 "referenced but not
+## assigned" false positives. Disable file-wide.
+# shellcheck disable=SC2154
 set -o errexit
 set -o nounset
 set -o pipefail
 set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
+export LC_ALL=C
+
+## style-ok: R-170
+## The only /tmp in this file is inside the emitted NoExecPaths= systemd unit
+## directive (a W^X hardening path written into the generated .service), not a
+## bash temp-directory path, so R-170 "use ${TMP}" does not apply.
 
 # shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
 source /usr/libexec/helper-scripts/strings.bsh
@@ -241,7 +252,27 @@ Requires=anon-ws-disable-stacked-tor_autogen_${file_name}.socket
 ## See Documentation:
 ## https://www.whonix.org/wiki/Redirect_Whonix-Workstation_Ports_or_Unix_Domain_Socket_Files_to_Whonix-Gateway
 ExecStart=/usr/lib/systemd/systemd-socket-proxyd ${destination_where}
-PrivateTmp=yes" > "./usr/lib/systemd/system/anon-ws-disable-stacked-tor_autogen_${file_name}.service"
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+## W^X hardening. systemd-socket-proxyd is a tiny upstream C socket forwarder
+## (no JIT, writes nothing). MemoryDenyWriteExecute denies anon W+X / mprotect/
+## shmat gaining PROT_EXEC; SystemCallArchitectures=native closes the secondary-
+## ABI bypass; LockPersonality blocks READ_IMPLIES_EXEC; ~memfd_create kills the
+## memfd bypass. ProtectSystem=strict (fs read-only bar /dev,/proc,/sys) +
+## ProtectHome + NoExecPaths close the file-backed vector near-completely for
+## this write-nothing proxy.
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+SystemCallFilter=~memfd_create
+NoExecPaths=/run /tmp /var/tmp /dev/shm /dev
+
+## Defense-in-depth (separate axis from W^X): NoNewPrivileges blocks this
+## daemon from gaining privileges (setuid/setgid, file capabilities, AppArmor
+## non-subset Px). systemd-socket-proxyd gains no privilege.
+NoNewPrivileges=yes" > "./usr/lib/systemd/system/anon-ws-disable-stacked-tor_autogen_${file_name}.service"
 
    if [ "${system_run}" = "true" ]; then
       systemctl --system daemon-reload
